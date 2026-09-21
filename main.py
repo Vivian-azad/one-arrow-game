@@ -43,7 +43,7 @@ MAX_MISTAKES = 3
 mistakes = MAX_MISTAKES
 
 # 游戏状态
-game_state = "playing"
+game_state = "start"
 
 
 # 创建棋盘
@@ -83,6 +83,53 @@ def get_cell_center(row, col):
     y = BOARD_Y + row * CELL_SIZE + CELL_SIZE // 2
 
     return x, y
+
+
+def draw_start_screen():
+    """绘制开始界面"""
+
+    title = font.render(
+        "一箭又一箭",
+        True,
+        (40, 40, 40)
+    )
+
+    screen.blit(
+        title,
+        (
+            WIDTH // 2 - title.get_width() // 2,
+            170
+        )
+    )
+
+    # 开始游戏按钮
+    button_rect = pygame.Rect(
+        WIDTH // 2 - 100,
+        300,
+        200,
+        60
+    )
+
+    pygame.draw.rect(
+        screen,
+        (80, 120, 200),
+        button_rect,
+        border_radius=10
+    )
+
+    button_text = font.render(
+        "开始游戏",
+        True,
+        (255, 255, 255)
+    )
+
+    screen.blit(
+        button_text,
+        (
+            WIDTH // 2 - button_text.get_width() // 2,
+            310
+        )
+    )
 
 
 def draw_game_info():
@@ -422,10 +469,6 @@ def is_level_complete():
     return True
 
 
-# 加载第一关
-load_level(current_level)
-
-
 running = True
 
 while running:
@@ -439,6 +482,27 @@ while running:
         elif event.type == pygame.MOUSEBUTTONDOWN:
 
             mouse_x, mouse_y = event.pos
+
+            # 开始界面
+            if game_state == "start":
+
+                button_rect = pygame.Rect(
+                    WIDTH // 2 - 100,
+                    300,
+                    200,
+                    60
+                )
+
+                if button_rect.collidepoint(
+                    mouse_x,
+                    mouse_y
+                ):
+
+                    current_level = 0
+                    load_level(current_level)
+                    game_state = "playing"
+
+                continue
 
             # 失败状态下点击重新开始按钮
             if game_state == "failed":
@@ -562,41 +626,48 @@ while running:
     # 绘制背景
     screen.fill((240, 240, 240))
 
-    # 绘制棋盘
-    for row in range(ROWS):
-        for col in range(COLS):
+    # 开始界面
+    if game_state == "start":
 
-            x = BOARD_X + col * CELL_SIZE
-            y = BOARD_Y + row * CELL_SIZE
+        draw_start_screen()
 
-            pygame.draw.rect(
-                screen,
-                (220, 220, 220),
-                (x, y, CELL_SIZE, CELL_SIZE),
-                1
-            )
+    else:
 
-    # 绘制所有箭头
-    for arrow in arrows:
+        # 绘制棋盘
+        for row in range(ROWS):
+            for col in range(COLS):
 
-        if (
-            arrow.flying
-            or board.grid[arrow.row][arrow.col] is not None
-        ):
-            draw_arrow(screen, arrow)
+                x = BOARD_X + col * CELL_SIZE
+                y = BOARD_Y + row * CELL_SIZE
 
-    # 绘制游戏信息
-    if game_state == "playing":
+                pygame.draw.rect(
+                    screen,
+                    (220, 220, 220),
+                    (x, y, CELL_SIZE, CELL_SIZE),
+                    1
+                )
 
-        draw_game_info()
+        # 绘制所有箭头
+        for arrow in arrows:
 
-    elif game_state == "failed":
+            if (
+                arrow.flying
+                or board.grid[arrow.row][arrow.col] is not None
+            ):
+                draw_arrow(screen, arrow)
 
-        draw_failed_screen()
+        # 绘制游戏信息
+        if game_state == "playing":
 
-    elif game_state == "won":
+            draw_game_info()
 
-        draw_won_screen()
+        elif game_state == "failed":
+
+            draw_failed_screen()
+
+        elif game_state == "won":
+
+            draw_won_screen()
 
     pygame.display.flip()
 
