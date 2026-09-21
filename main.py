@@ -178,6 +178,67 @@ def draw_failed_screen():
     )
 
 
+def draw_won_screen():
+    """绘制胜利界面"""
+
+    title = font.render(
+        "恭喜通关！",
+        True,
+        (50, 150, 80)
+    )
+
+    message = font.render(
+        "你完成了所有关卡",
+        True,
+        (40, 40, 40)
+    )
+
+    screen.blit(
+        title,
+        (
+            WIDTH // 2 - title.get_width() // 2,
+            170
+        )
+    )
+
+    screen.blit(
+        message,
+        (
+            WIDTH // 2 - message.get_width() // 2,
+            230
+        )
+    )
+
+    # 重新开始游戏按钮
+    button_rect = pygame.Rect(
+        WIDTH // 2 - 100,
+        300,
+        200,
+        60
+    )
+
+    pygame.draw.rect(
+        screen,
+        (80, 150, 100),
+        button_rect,
+        border_radius=10
+    )
+
+    button_text = font.render(
+        "重新开始游戏",
+        True,
+        (255, 255, 255)
+    )
+
+    screen.blit(
+        button_text,
+        (
+            WIDTH // 2 - button_text.get_width() // 2,
+            310
+        )
+    )
+
+
 def draw_arrow(screen, arrow):
     """绘制一个箭头"""
 
@@ -193,7 +254,11 @@ def draw_arrow(screen, arrow):
         center_x = arrow.x
         center_y = arrow.y
 
-    color = (40, 40, 40)
+    # 碰撞时显示红色，否则显示黑色
+    if arrow.hit_timer > 0:
+        color = (200, 60, 60)
+    else:
+        color = (40, 40, 40)
 
     # 向右
     if arrow.direction == "right":
@@ -310,6 +375,10 @@ def start_flying(arrow):
 def update_arrow(arrow):
     """更新箭头的飞行动画"""
 
+    # 更新碰撞反馈计时器
+    if arrow.hit_timer > 0:
+        arrow.hit_timer -= 1
+
     if not arrow.flying:
         return
 
@@ -391,6 +460,27 @@ while running:
 
                 continue
 
+            # 胜利状态下点击重新开始游戏按钮
+            if game_state == "won":
+
+                button_rect = pygame.Rect(
+                    WIDTH // 2 - 100,
+                    300,
+                    200,
+                    60
+                )
+
+                if button_rect.collidepoint(
+                    mouse_x,
+                    mouse_y
+                ):
+
+                    current_level = 0
+                    load_level(current_level)
+                    game_state = "playing"
+
+                continue
+
             # 非游戏状态下不处理其他点击
             if game_state != "playing":
                 continue
@@ -417,6 +507,9 @@ while running:
                 else:
 
                     mistakes -= 1
+
+                    # 显示碰撞反馈
+                    clicked_arrow.hit_timer = 18
 
                     print(
                         "箭头被挡住：",
@@ -500,6 +593,10 @@ while running:
     elif game_state == "failed":
 
         draw_failed_screen()
+
+    elif game_state == "won":
+
+        draw_won_screen()
 
     pygame.display.flip()
 
