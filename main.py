@@ -21,14 +21,7 @@ pygame.init()
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 
-# 临时调试：打印实际窗口尺寸
-info = pygame.display.Info()
-print("实际屏幕分辨率：", info.current_w, info.current_h)
-
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-#temp test
-print("窗口尺寸：", screen.get_size())
-print("SCREEN_WIDTH =", SCREEN_WIDTH)
 pygame.display.set_caption("一箭又一箭")
 
 clock = pygame.time.Clock()
@@ -1066,10 +1059,8 @@ def draw_failed_screen():
 
 def draw_won_screen():
 
-    center_x = SCREEN_WIDTH // 2
-
     title = title_font.render("恭喜通关！", True, TEXT_COLOR)
-    title_rect = title.get_rect(center=(center_x, 160))
+    title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 160))
     screen.blit(title, title_rect)
 
     if current_level < len(LEVELS) - 1:
@@ -1077,21 +1068,22 @@ def draw_won_screen():
     else:
         message = font.render("你已经完成所有关卡！", True, TEXT_DIM_COLOR)
 
-    message_rect = message.get_rect(center=(center_x, 220))
+    message_rect = message.get_rect(center=(SCREEN_WIDTH // 2, 220))
     screen.blit(message, message_rect)
 
+    # 显示本关耗时
     elapsed = get_elapsed_ms()
     time_text = font.render(f"本关耗时：{format_time(elapsed)}", True, TIMER_TEXT_COLOR)
-    time_rect = time_text.get_rect(center=(center_x, 270))
+    time_rect = time_text.get_rect(center=(SCREEN_WIDTH // 2, 270))
     screen.blit(time_text, time_rect)
 
-    next_button = pygame.Rect(0, 0, 200, 60)
-    next_button.center = (center_x, 360)
+    next_button = pygame.Rect(300, 330, 200, 60)
 
     if current_level < len(LEVELS) - 1:
         draw_button("下一关", next_button)
     else:
         draw_button("重新开始", next_button)
+
 
 # ============================================================
 #                       教程部分
