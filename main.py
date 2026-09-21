@@ -4,7 +4,9 @@ date: 2026-09-21
 task: 一箭又一箭
 """
 
+import json
 import math
+import os
 import random
 
 import pygame
@@ -34,6 +36,8 @@ CELL_SIZE = BOARD_SIZE // COLS
 
 BOARD_X = (SCREEN_WIDTH - BOARD_SIZE) // 2
 BOARD_Y = 62
+
+SAVE_FILE = "save.json"
 
 
 # ==================== 颜色 ====================
@@ -76,16 +80,27 @@ HIT_COLOR = (220, 70, 70)
 
 TEXT_COLOR = (230, 240, 255)
 TEXT_DIM_COLOR = (150, 180, 220)
+TEXT_DISABLED_COLOR = (90, 105, 130)
 
 BUTTON_COLOR = (30, 70, 140)
 BUTTON_HOVER_COLOR = (50, 110, 200)
 BUTTON_BORDER_COLOR = (90, 180, 255)
 
-# 计时器
+BUTTON_DISABLED_COLOR = (40, 45, 60)
+BUTTON_DISABLED_BORDER = (80, 90, 110)
+
 TIMER_BG_COLOR = (255, 240, 180)
 TIMER_BG_ALPHA = 45
 TIMER_BORDER_COLOR = (255, 225, 130)
 TIMER_TEXT_COLOR = (255, 250, 230)
+
+PAUSE_BUTTON_COLOR = (30, 70, 140)
+PAUSE_BUTTON_HOVER = (50, 110, 200)
+PAUSE_BUTTON_BORDER = (90, 180, 255)
+
+OVERLAY_COLOR = (0, 0, 0, 160)
+PAUSE_PANEL_COLOR = (20, 30, 60)
+PAUSE_PANEL_BORDER = (90, 180, 255)
 
 WHITE = (255, 255, 255)
 
@@ -131,14 +146,11 @@ def multi_stop_gradient(stops, t):
 
 
 def build_starfield_surface():
-    """预渲染星云 + 银河"""
 
     surface = pygame.Surface(
         (SCREEN_WIDTH, SCREEN_HEIGHT),
         pygame.SRCALPHA
     )
-
-    # ---------- 星云 ----------
 
     nebula_centers = [
         (-60, 520, 340, 0),
@@ -175,8 +187,6 @@ def build_starfield_surface():
                 (int(px), int(py)),
                 int(r)
             )
-
-    # ---------- 银河 ----------
 
     def galaxy_point(t):
         x = SCREEN_WIDTH * 1.05 - t * SCREEN_WIDTH * 1.25
@@ -293,8 +303,6 @@ def build_starfield_surface():
 starfield_surface = build_starfield_surface()
 
 
-# ---------- 星星 ----------
-
 stars = []
 
 for _ in range(140):
@@ -320,8 +328,6 @@ for _ in range(140):
         (x, y, radius, base_brightness, phase, speed, flicker_amp, has_cross)
     )
 
-
-# ---------- 星球 ----------
 
 def build_planet_texture(seed_offset, count):
     rng = random.Random(STAR_SEED + seed_offset)
@@ -377,15 +383,64 @@ arrows = []
 
 mistakes = 3
 
-# 计时器
-level_start_ticks = 0       # 本关开始时刻（毫秒）
-level_elapsed_ms = 0        # 本关已耗时（毫秒，停表后固定）
-timer_running = False       # 是否正在计时
+level_start_ticks = 0
+level_elapsed_ms = 0
+timer_running = False
+
+# 暂停时冻结的耗时
+paused_elapsed_ms = 0
 
 
 tutorial_timer = 0
 tutorial_arrow_x = 0
 tutorial_arrows = []
+
+
+# ==================== 存档 ====================
+
+def has_save():
+    return os.path.exists(SAVE_FILE)
+
+
+def delete_save():
+    if os.path.exists(SAVE_FILE):
+        os.remove(SAVE_FILE)
+
+
+def write_save():
+
+    # 只保存静止的箭头
+    arrow_data = []
+
+    for arrow in arrows:
+        if not arrow.flying:
+            arrow_data.append({
+                "row": arrow.row,
+                "col": arrow.col,
+                "direction": arrow.direction,
+            })
+
+    data = {
+        "level_index": current_level,
+        "elapsed_ms": get_elapsed_ms(),
+        "mistakes": mistakes,
+        "arrows": arrow_data,
+    }
+
+    with open(SAVE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def read_save():
+
+    if not has_save():
+        return None
+
+    try:
+        with open(SAVE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 # ==================== 基本函数 ====================
@@ -416,9 +471,41 @@ def load_level(level_index):
         x, y = get_cell_center(arrow.row, arrow.col)
         arrow.set_position(x, y)
 
-    # 重置计时器并开始计时
     level_start_ticks = pygame.time.get_ticks()
     level_elapsed_ms = 0
+    timer_running = True
+
+
+def load_save_state(save_data):
+    """从存档恢复关卡"""
+
+    global board
+    global arrows
+    global mistakes
+    global current_level
+    global level_start_ticks
+    global level_elapsed_ms
+    global timer_running
+
+    current_level = save_data["level_index"]
+
+    board = Board(ROWS, COLS)
+    arrows = []
+
+    for item in save_data["arrows"]:
+
+        arrow = Arrow(item["row"], item["col"], item["direction"])
+
+        board.add_arrow(arrow)
+        arrows.append(arrow)
+
+        x, y = get_cell_center(arrow.row, arrow.col)
+        arrow.set_position(x, y)
+
+    mistakes = save_data["mistakes"]
+
+    level_elapsed_ms = save_data["elapsed_ms"]
+    level_start_ticks = pygame.time.get_ticks() - level_elapsed_ms
     timer_running = True
 
 
@@ -684,26 +771,34 @@ def draw_starfield(time_s):
 
 # ==================== 绘制按钮 ====================
 
-def draw_button(text, rect):
+def draw_button(text, rect, enabled=True):
+    """绘制按钮，enabled=False 时变灰不可点"""
 
     mouse_pos = pygame.mouse.get_pos()
 
-    if rect.collidepoint(mouse_pos):
+    if not enabled:
+        color = BUTTON_DISABLED_COLOR
+        border = BUTTON_DISABLED_BORDER
+    elif rect.collidepoint(mouse_pos):
         color = BUTTON_HOVER_COLOR
+        border = BUTTON_BORDER_COLOR
     else:
         color = BUTTON_COLOR
+        border = BUTTON_BORDER_COLOR
 
     pygame.draw.rect(screen, color, rect, border_radius=8)
 
     pygame.draw.rect(
         screen,
-        BUTTON_BORDER_COLOR,
+        border,
         rect,
         width=2,
         border_radius=8
     )
 
-    text_surface = font.render(text, True, WHITE)
+    text_color = WHITE if enabled else TEXT_DISABLED_COLOR
+
+    text_surface = font.render(text, True, text_color)
     text_rect = text_surface.get_rect()
     text_rect.center = rect.center
 
@@ -719,7 +814,6 @@ def draw_timer():
     timer_x = SCREEN_WIDTH - timer_width - 20
     timer_y = 10
 
-    # 半透明淡黄底
     bg_surface = pygame.Surface(
         (timer_width, timer_height),
         pygame.SRCALPHA
@@ -734,7 +828,6 @@ def draw_timer():
 
     screen.blit(bg_surface, (timer_x, timer_y))
 
-    # 边框
     pygame.draw.rect(
         screen,
         TIMER_BORDER_COLOR,
@@ -743,14 +836,51 @@ def draw_timer():
         border_radius=10
     )
 
-    # 时间文字
     elapsed = get_elapsed_ms()
     time_str = format_time(elapsed)
 
     time_text = font.render(time_str, True, TIMER_TEXT_COLOR)
-    time_rect = time_text.get_rect(center=(timer_x + timer_width // 2, timer_y + timer_height // 2))
+    time_rect = time_text.get_rect(
+        center=(timer_x + timer_width // 2, timer_y + timer_height // 2)
+    )
 
     screen.blit(time_text, time_rect)
+
+
+# ==================== 暂停按钮 ====================
+
+PAUSE_BUTTON_RECT = pygame.Rect(
+    SCREEN_WIDTH - 130 - 20,
+    64,
+    130,
+    32
+)
+
+
+def draw_pause_button():
+
+    mouse_pos = pygame.mouse.get_pos()
+
+    if PAUSE_BUTTON_RECT.collidepoint(mouse_pos):
+        color = PAUSE_BUTTON_HOVER
+    else:
+        color = PAUSE_BUTTON_COLOR
+
+    pygame.draw.rect(screen, color, PAUSE_BUTTON_RECT, border_radius=8)
+
+    pygame.draw.rect(
+        screen,
+        PAUSE_BUTTON_BORDER,
+        PAUSE_BUTTON_RECT,
+        width=2,
+        border_radius=8
+    )
+
+    text_surface = small_font.render("暂停", True, WHITE)
+    text_rect = text_surface.get_rect()
+    text_rect.center = PAUSE_BUTTON_RECT.center
+
+    screen.blit(text_surface, text_rect)
 
 
 # ==================== 开始界面 ====================
@@ -758,7 +888,7 @@ def draw_timer():
 def draw_start_screen():
 
     title = title_font.render("一箭又一箭", True, TEXT_COLOR)
-    title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 170))
+    title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 150))
     screen.blit(title, title_rect)
 
     subtitle = font.render(
@@ -766,11 +896,18 @@ def draw_start_screen():
         True,
         TEXT_DIM_COLOR
     )
-    subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 240))
+    subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 220))
     screen.blit(subtitle, subtitle_rect)
 
-    start_button = pygame.Rect(300, 320, 200, 60)
-    draw_button("开始游戏", start_button)
+    # 新游戏按钮
+    new_game_button = pygame.Rect(0, 0, 220, 60)
+    new_game_button.center = (SCREEN_WIDTH // 2, 330)
+    draw_button("新游戏", new_game_button)
+
+    # 继续游戏按钮
+    continue_button = pygame.Rect(0, 0, 220, 60)
+    continue_button.center = (SCREEN_WIDTH // 2, 410)
+    draw_button("继续游戏", continue_button, enabled=has_save())
 
 
 # ==================== 游戏信息 ====================
@@ -779,11 +916,9 @@ def draw_game_info():
 
     level_text = font.render(f"第 {current_level + 1} 关", True, TEXT_COLOR)
     mistake_text = font.render(f"剩余机会：{mistakes}", True, TEXT_COLOR)
-    arrow_text = font.render(f"剩余火箭：{len(arrows)}", True, TEXT_COLOR)
 
     screen.blit(level_text, (30, 14))
     screen.blit(mistake_text, (250, 14))
-    screen.blit(arrow_text, (500, 14))
 
 
 # ==================== 绘制棋盘 ====================
@@ -1033,25 +1168,82 @@ def is_level_complete():
     return len(arrows) == 0
 
 
+# ==================== 暂停界面 ====================
+
+def draw_pause_overlay():
+
+    # 半透明遮罩
+    overlay = pygame.Surface(
+        (SCREEN_WIDTH, SCREEN_HEIGHT),
+        pygame.SRCALPHA
+    )
+    overlay.fill(OVERLAY_COLOR)
+    screen.blit(overlay, (0, 0))
+
+    # 暂停面板
+    panel_width = 320
+    panel_height = 260
+    panel_x = (SCREEN_WIDTH - panel_width) // 2
+    panel_y = (SCREEN_HEIGHT - panel_height) // 2
+
+    panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
+
+    pygame.draw.rect(
+        screen,
+        PAUSE_PANEL_COLOR,
+        panel_rect,
+        border_radius=14
+    )
+
+    pygame.draw.rect(
+        screen,
+        PAUSE_PANEL_BORDER,
+        panel_rect,
+        width=2,
+        border_radius=14
+    )
+
+    # 标题
+    title = large_font.render("游戏暂停", True, TEXT_COLOR)
+    title_rect = title.get_rect(
+        center=(SCREEN_WIDTH // 2, panel_y + 50)
+    )
+    screen.blit(title, title_rect)
+
+    # 继续游戏按钮
+    resume_button = pygame.Rect(0, 0, 220, 52)
+    resume_button.center = (SCREEN_WIDTH // 2, panel_y + 130)
+    draw_button("继续游戏", resume_button)
+
+    # 存档并退出按钮
+    save_button = pygame.Rect(0, 0, 220, 52)
+    save_button.center = (SCREEN_WIDTH // 2, panel_y + 200)
+    draw_button("存档并退出", save_button)
+
+    return resume_button, save_button
+
+
 # ==================== 失败界面 ====================
 
 def draw_failed_screen():
 
+    center_x = SCREEN_WIDTH // 2
+
     title = title_font.render("挑战失败", True, HIT_COLOR)
-    title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 180))
+    title_rect = title.get_rect(center=(center_x, 180))
     screen.blit(title, title_rect)
 
     message = font.render("错误次数已经用完", True, TEXT_DIM_COLOR)
-    message_rect = message.get_rect(center=(SCREEN_WIDTH // 2, 240))
+    message_rect = message.get_rect(center=(center_x, 240))
     screen.blit(message, message_rect)
 
-    # 显示本关耗时
     elapsed = get_elapsed_ms()
     time_text = font.render(f"本关耗时：{format_time(elapsed)}", True, TEXT_DIM_COLOR)
-    time_rect = time_text.get_rect(center=(SCREEN_WIDTH // 2, 280))
+    time_rect = time_text.get_rect(center=(center_x, 280))
     screen.blit(time_text, time_rect)
 
-    restart_button = pygame.Rect(300, 340, 200, 60)
+    restart_button = pygame.Rect(0, 0, 200, 60)
+    restart_button.center = (center_x, 360)
     draw_button("重新开始本关", restart_button)
 
 
@@ -1059,8 +1251,10 @@ def draw_failed_screen():
 
 def draw_won_screen():
 
+    center_x = SCREEN_WIDTH // 2
+
     title = title_font.render("恭喜通关！", True, TEXT_COLOR)
-    title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 160))
+    title_rect = title.get_rect(center=(center_x, 160))
     screen.blit(title, title_rect)
 
     if current_level < len(LEVELS) - 1:
@@ -1068,16 +1262,16 @@ def draw_won_screen():
     else:
         message = font.render("你已经完成所有关卡！", True, TEXT_DIM_COLOR)
 
-    message_rect = message.get_rect(center=(SCREEN_WIDTH // 2, 220))
+    message_rect = message.get_rect(center=(center_x, 220))
     screen.blit(message, message_rect)
 
-    # 显示本关耗时
     elapsed = get_elapsed_ms()
     time_text = font.render(f"本关耗时：{format_time(elapsed)}", True, TIMER_TEXT_COLOR)
-    time_rect = time_text.get_rect(center=(SCREEN_WIDTH // 2, 270))
+    time_rect = time_text.get_rect(center=(center_x, 270))
     screen.blit(time_text, time_rect)
 
-    next_button = pygame.Rect(300, 330, 200, 60)
+    next_button = pygame.Rect(0, 0, 200, 60)
+    next_button.center = (center_x, 350)
 
     if current_level < len(LEVELS) - 1:
         draw_button("下一关", next_button)
@@ -1317,7 +1511,8 @@ def draw_tutorial_complete():
     message2_rect = message2.get_rect(center=(SCREEN_WIDTH // 2, 280))
     screen.blit(message2, message2_rect)
 
-    start_button = pygame.Rect(300, 340, 200, 60)
+    start_button = pygame.Rect(0, 0, 200, 60)
+    start_button.center = (SCREEN_WIDTH // 2, 370)
     draw_button("开始第一关", start_button)
 
 
@@ -1338,14 +1533,36 @@ while running:
 
             mouse_pos = event.pos
 
+            # ==================== 开始界面 ====================
+
             if game_state == "start":
 
-                start_button = pygame.Rect(300, 320, 200, 60)
+                new_game_button = pygame.Rect(0, 0, 220, 60)
+                new_game_button.center = (SCREEN_WIDTH // 2, 330)
 
-                if start_button.collidepoint(mouse_pos):
+                continue_button = pygame.Rect(0, 0, 220, 60)
+                continue_button.center = (SCREEN_WIDTH // 2, 410)
+
+                if new_game_button.collidepoint(mouse_pos):
+
+                    # 新游戏：清存档，从第 1 关开始
+                    delete_save()
+
+                    current_level = 0
+                    load_level(current_level)
                     game_state = "tutorial_success"
                     tutorial_timer = 0
                     tutorial_arrow_x = BOARD_X + 2 * CELL_SIZE + CELL_SIZE // 2
+
+                elif continue_button.collidepoint(mouse_pos) and has_save():
+
+                    save_data = read_save()
+
+                    if save_data is not None:
+                        load_save_state(save_data)
+                        game_state = "playing"
+
+            # ==================== 教学 ====================
 
             elif game_state == "tutorial_play":
 
@@ -1381,40 +1598,86 @@ while running:
 
             elif game_state == "tutorial_complete":
 
-                start_button = pygame.Rect(300, 340, 200, 60)
+                start_button = pygame.Rect(0, 0, 200, 60)
+                start_button.center = (SCREEN_WIDTH // 2, 370)
 
                 if start_button.collidepoint(mouse_pos):
                     current_level = 0
                     load_level(current_level)
                     game_state = "playing"
 
+            # ==================== 正式游戏 ====================
+
             elif game_state == "playing":
 
-                clicked_arrow = get_clicked_arrow(mouse_pos)
+                # 先检查暂停按钮
+                if PAUSE_BUTTON_RECT.collidepoint(mouse_pos):
 
-                if clicked_arrow is not None:
+                    stop_timer()
+                    paused_elapsed_ms = level_elapsed_ms
+                    game_state = "paused"
 
-                    if board.can_exit(clicked_arrow):
-                        start_flying(clicked_arrow)
-                    else:
-                        clicked_arrow.hit_timer = 18
-                        mistakes -= 1
+                else:
 
-                        if mistakes <= 0:
-                            stop_timer()
-                            game_state = "failed"
+                    clicked_arrow = get_clicked_arrow(mouse_pos)
+
+                    if clicked_arrow is not None:
+
+                        if board.can_exit(clicked_arrow):
+                            start_flying(clicked_arrow)
+                        else:
+                            clicked_arrow.hit_timer = 18
+                            mistakes -= 1
+
+                            if mistakes <= 0:
+                                stop_timer()
+                                game_state = "failed"
+
+            # ==================== 暂停中 ====================
+
+            elif game_state == "paused":
+
+                panel_width = 320
+                panel_height = 260
+                panel_x = (SCREEN_WIDTH - panel_width) // 2
+                panel_y = (SCREEN_HEIGHT - panel_height) // 2
+
+                resume_button = pygame.Rect(0, 0, 220, 52)
+                resume_button.center = (SCREEN_WIDTH // 2, panel_y + 130)
+
+                save_button = pygame.Rect(0, 0, 220, 52)
+                save_button.center = (SCREEN_WIDTH // 2, panel_y + 200)
+
+                if resume_button.collidepoint(mouse_pos):
+
+                    # 恢复计时
+                    level_start_ticks = pygame.time.get_ticks() - paused_elapsed_ms
+                    timer_running = True
+                    game_state = "playing"
+
+                elif save_button.collidepoint(mouse_pos):
+
+                    # 存档并退出
+                    write_save()
+                    game_state = "start"
+
+            # ==================== 失败界面 ====================
 
             elif game_state == "failed":
 
-                restart_button = pygame.Rect(300, 340, 200, 60)
+                restart_button = pygame.Rect(0, 0, 200, 60)
+                restart_button.center = (SCREEN_WIDTH // 2, 360)
 
                 if restart_button.collidepoint(mouse_pos):
                     load_level(current_level)
                     game_state = "playing"
 
+            # ==================== 通关界面 ====================
+
             elif game_state == "won":
 
-                next_button = pygame.Rect(300, 330, 200, 60)
+                next_button = pygame.Rect(0, 0, 200, 60)
+                next_button.center = (SCREEN_WIDTH // 2, 350)
 
                 if next_button.collidepoint(mouse_pos):
 
@@ -1426,6 +1689,8 @@ while running:
                         current_level = 0
                         load_level(current_level)
                         game_state = "playing"
+
+    # ==================== 更新 ====================
 
     if game_state == "tutorial_success":
         update_tutorial_success()
@@ -1469,12 +1734,30 @@ while running:
         draw_game_info()
         draw_board()
         draw_timer()
+        draw_pause_button()
 
         for arrow in arrows:
             if arrow.hit_timer > 0:
                 draw_arrow(arrow, HIT_COLOR)
             else:
                 draw_arrow(arrow)
+
+    elif game_state == "paused":
+
+        # 先画游戏画面
+        draw_game_info()
+        draw_board()
+        draw_timer()
+        draw_pause_button()
+
+        for arrow in arrows:
+            if arrow.hit_timer > 0:
+                draw_arrow(arrow, HIT_COLOR)
+            else:
+                draw_arrow(arrow)
+
+        # 再盖遮罩和暂停面板
+        draw_pause_overlay()
 
     elif game_state == "failed":
         draw_failed_screen()
