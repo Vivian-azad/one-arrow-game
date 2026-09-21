@@ -2,6 +2,7 @@ import pygame
 
 from game.arrow import Arrow
 from game.board import Board
+from levels.levels import LEVELS
 
 
 pygame.init()
@@ -17,6 +18,13 @@ pygame.display.set_caption("一箭又一箭")
 clock = pygame.time.Clock()
 
 
+# 游戏界面字体
+font = pygame.font.Font(
+    "C:/Windows/Fonts/msyh.ttc",
+    32
+)
+
+
 # 棋盘参数
 BOARD_SIZE = 480
 ROWS = 8
@@ -27,12 +35,45 @@ BOARD_X = (WIDTH - BOARD_SIZE) // 2
 BOARD_Y = (HEIGHT - BOARD_SIZE) // 2
 
 
+# 当前关卡
+current_level = 0
+
+# 每一关允许的失误次数
+MAX_MISTAKES = 3
+mistakes = MAX_MISTAKES
+
+# 游戏状态
+game_state = "playing"
+
+
 # 创建棋盘
 board = Board(ROWS, COLS)
 
-# 创建测试箭头
-arrow = Arrow(3, 3, "left")
-board.add_arrow(arrow)
+# 保存当前关卡的所有箭头
+arrows = []
+
+
+def load_level(level_index):
+    """加载指定关卡"""
+
+    global board, arrows, mistakes
+
+    board = Board(ROWS, COLS)
+    arrows = []
+    mistakes = MAX_MISTAKES
+
+    level_data = LEVELS[level_index]
+
+    for row, col, direction in level_data:
+
+        arrow = Arrow(
+            row,
+            col,
+            direction
+        )
+
+        board.add_arrow(arrow)
+        arrows.append(arrow)
 
 
 def get_cell_center(row, col):
@@ -44,16 +85,111 @@ def get_cell_center(row, col):
     return x, y
 
 
+def draw_game_info():
+    """绘制当前关卡和游戏状态"""
+
+    level_text = font.render(
+        f"第 {current_level + 1} 关",
+        True,
+        (40, 40, 40)
+    )
+
+    arrow_count = sum(
+        1
+        for arrow in arrows
+        if board.grid[arrow.row][arrow.col] is not None
+    )
+
+    arrow_text = font.render(
+        f"剩余箭头：{arrow_count}",
+        True,
+        (40, 40, 40)
+    )
+
+    mistake_text = font.render(
+        f"剩余失误：{mistakes}",
+        True,
+        (40, 40, 40)
+    )
+
+    screen.blit(level_text, (40, 40))
+    screen.blit(arrow_text, (40, 80))
+    screen.blit(mistake_text, (40, 120))
+
+
+def draw_failed_screen():
+    """绘制失败界面"""
+
+    title = font.render(
+        "游戏失败",
+        True,
+        (180, 50, 50)
+    )
+
+    message = font.render(
+        "失误次数已经用完",
+        True,
+        (40, 40, 40)
+    )
+
+    screen.blit(
+        title,
+        (
+            WIDTH // 2 - title.get_width() // 2,
+            170
+        )
+    )
+
+    screen.blit(
+        message,
+        (
+            WIDTH // 2 - message.get_width() // 2,
+            230
+        )
+    )
+
+    # 重新开始按钮
+    button_rect = pygame.Rect(
+        WIDTH // 2 - 100,
+        300,
+        200,
+        60
+    )
+
+    pygame.draw.rect(
+        screen,
+        (80, 120, 200),
+        button_rect,
+        border_radius=10
+    )
+
+    button_text = font.render(
+        "重新开始",
+        True,
+        (255, 255, 255)
+    )
+
+    screen.blit(
+        button_text,
+        (
+            WIDTH // 2 - button_text.get_width() // 2,
+            310
+        )
+    )
+
+
 def draw_arrow(screen, arrow):
     """绘制一个箭头"""
 
-    # 如果箭头还没有设置屏幕坐标，就根据棋盘位置计算
     if arrow.x is None or arrow.y is None:
+
         center_x, center_y = get_cell_center(
             arrow.row,
             arrow.col
         )
+
     else:
+
         center_x = arrow.x
         center_y = arrow.y
 
@@ -147,33 +283,27 @@ def draw_arrow(screen, arrow):
 def get_clicked_arrow(mouse_x, mouse_y):
     """根据鼠标位置找到被点击的箭头"""
 
-    # 点击是否在棋盘范围内
     if not (
         BOARD_X <= mouse_x < BOARD_X + BOARD_SIZE
         and BOARD_Y <= mouse_y < BOARD_Y + BOARD_SIZE
     ):
         return None
 
-    # 将鼠标坐标转换成棋盘坐标
     col = (mouse_x - BOARD_X) // CELL_SIZE
     row = (mouse_y - BOARD_Y) // CELL_SIZE
 
-    # 获取对应棋盘格
     return board.grid[row][col]
 
 
 def start_flying(arrow):
     """开始箭头飞出动画"""
 
-    # 获取箭头当前所在的格子中心
     x, y = get_cell_center(
         arrow.row,
         arrow.col
     )
 
     arrow.set_position(x, y)
-
-    # 标记箭头正在飞出
     arrow.flying = True
 
 
@@ -185,7 +315,6 @@ def update_arrow(arrow):
 
     speed = 8
 
-    # 根据方向移动
     if arrow.direction == "right":
         arrow.x += speed
 
@@ -198,17 +327,34 @@ def update_arrow(arrow):
     elif arrow.direction == "up":
         arrow.y -= speed
 
-    # 判断箭头是否已经飞出窗口
+    # 箭头飞出窗口
     if (
         arrow.x < -50
         or arrow.x > WIDTH + 50
         or arrow.y < -50
         or arrow.y > HEIGHT + 50
     ):
-        # 从棋盘中删除
-        board.grid[arrow.row][arrow.col] = None
 
+        board.grid[arrow.row][arrow.col] = None
         arrow.flying = False
+
+
+def is_level_complete():
+    """判断当前关卡是否已经清空"""
+
+    for arrow in arrows:
+
+        if arrow.flying:
+            return False
+
+        if board.grid[arrow.row][arrow.col] is not None:
+            return False
+
+    return True
+
+
+# 加载第一关
+load_level(current_level)
 
 
 running = True
@@ -221,36 +367,104 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-        # 鼠标点击
         elif event.type == pygame.MOUSEBUTTONDOWN:
 
             mouse_x, mouse_y = event.pos
+
+            # 失败状态下点击重新开始按钮
+            if game_state == "failed":
+
+                button_rect = pygame.Rect(
+                    WIDTH // 2 - 100,
+                    300,
+                    200,
+                    60
+                )
+
+                if button_rect.collidepoint(
+                    mouse_x,
+                    mouse_y
+                ):
+
+                    load_level(current_level)
+                    game_state = "playing"
+
+                continue
+
+            # 非游戏状态下不处理其他点击
+            if game_state != "playing":
+                continue
 
             clicked_arrow = get_clicked_arrow(
                 mouse_x,
                 mouse_y
             )
 
-            # 点击到了箭头，并且箭头没有正在飞
             if (
                 clicked_arrow is not None
                 and not clicked_arrow.flying
             ):
 
-                # 判断是否可以出去
                 if board.can_exit(clicked_arrow):
 
-                    print("箭头可以出去！")
+                    print(
+                        "箭头可以出去：",
+                        clicked_arrow.direction
+                    )
 
-                    # 开始飞行动画
                     start_flying(clicked_arrow)
 
                 else:
 
-                    print("箭头被挡住了！")
+                    mistakes -= 1
 
-    # 更新箭头位置
-    update_arrow(arrow)
+                    print(
+                        "箭头被挡住：",
+                        clicked_arrow.direction
+                    )
+
+                    print(
+                        "剩余失误次数：",
+                        mistakes
+                    )
+
+                    if mistakes <= 0:
+
+                        game_state = "failed"
+
+                        print("游戏失败！")
+
+    # 只有游戏进行中才更新箭头
+    if game_state == "playing":
+
+        for arrow in arrows:
+            update_arrow(arrow)
+
+    # 判断关卡是否完成
+    if (
+        game_state == "playing"
+        and is_level_complete()
+    ):
+
+        # 还有下一关
+        if current_level < len(LEVELS) - 1:
+
+            current_level += 1
+
+            print(
+                "进入第",
+                current_level + 1,
+                "关"
+            )
+
+            load_level(current_level)
+
+        # 所有关卡完成
+        else:
+
+            print("所有关卡完成！")
+
+            game_state = "won"
 
     # 绘制背景
     screen.fill((240, 240, 240))
@@ -269,14 +483,26 @@ while running:
                 1
             )
 
-    # 箭头没有飞出时才绘制
-    if arrow.flying or board.grid[arrow.row][arrow.col] is not None:
-        draw_arrow(screen, arrow)
+    # 绘制所有箭头
+    for arrow in arrows:
 
-    # 更新画面
+        if (
+            arrow.flying
+            or board.grid[arrow.row][arrow.col] is not None
+        ):
+            draw_arrow(screen, arrow)
+
+    # 绘制游戏信息
+    if game_state == "playing":
+
+        draw_game_info()
+
+    elif game_state == "failed":
+
+        draw_failed_screen()
+
     pygame.display.flip()
 
-    # 控制帧率
     clock.tick(60)
 
 
